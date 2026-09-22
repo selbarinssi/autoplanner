@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 const NAV = [
   { href: '/plan', label: 'Plan Board', group: 'Daily' },
   { href: '/orders', label: 'Orders & Calls', group: 'Daily' },
+  { href: '/map', label: 'Map', group: 'Daily' },
   { href: '/config/neighborhoods', label: 'Neighborhoods', group: 'Master Data' },
   { href: '/config/clusters', label: 'Clusters', group: 'Master Data' },
   { href: '/config/fleet', label: 'Fleet', group: 'Master Data' },
