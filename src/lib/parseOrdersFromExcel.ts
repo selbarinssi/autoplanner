@@ -40,7 +40,6 @@ export function parseOrdersFromExcel(
     return { orders: [], errors: ['Empty workbook'], sheetName, rowCount: 0 };
   }
 
-  // O'Planner: skip first 5 rows so header is the IKEA column titles
   const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
     header: 1,
     defval: '',
@@ -66,7 +65,6 @@ export function parseOrdersFromExcel(
   const volIdx = h.indexOf('Capacity Value Volume');
   const valIdx = h.indexOf('Service Goods Value');
 
-  // Same fixed columns as O'Planner
   const timeSlotIdx = 7;
   const custNameIdx = 36;
   const custPhoneIdx = 41;
@@ -81,10 +79,6 @@ export function parseOrdersFromExcel(
       sheetName,
       rowCount: rows.length - 1,
     };
-  }
-
-  if (Object.keys(postal).length === 0) {
-    // Still import; city/area may be Unknown / postcode
   }
 
   type Acc = Order & { assemblyMin: number };
