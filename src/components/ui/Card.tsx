@@ -1,10 +1,17 @@
-interface CardProps {
+import { HTMLAttributes } from 'react';
+
+interface CardProps extends HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
   className?: string;
   padding?: boolean;
 }
 
-export function Card({ children, className = '', padding = true }: CardProps) {
+export function Card({
+  children,
+  className = '',
+  padding = true,
+  ...props
+}: CardProps) {
   return (
     <div
       className={`
@@ -15,6 +22,7 @@ export function Card({ children, className = '', padding = true }: CardProps) {
         ${padding ? 'p-5' : ''}
         ${className}
       `}
+      {...props}
     >
       {children}
     </div>
