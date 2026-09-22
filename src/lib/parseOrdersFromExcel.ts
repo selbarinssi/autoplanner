@@ -1,62 +1,12 @@
+import * as XLSX from 'xlsx';
 import type { Order, OrderStatus } from '@/domain/types';
 
-function norm(h: string): string {
-  return h
+function norm(h: unknown): string {
+  return String(h ?? '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]/g, '');
-}
-
-/** Minimal CSV parser: handles quoted fields and ; or , separators */
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = '';
-  let inQuotes = false;
-
-  // Strip BOM
-  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-
-  // Detect separator from first line
-  const firstLine = text.split(/\r?\n/)[0] ?? '';
-  const semiCount = (firstLine.match(/;/g) || []).length;
-  const commaCount = (firstLine.match(/,/g) || []).length;
-  const sep = semiCount > commaCount ? ';' : ',';
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    const next = text[i + 1];
-
-    if (inQuotes) {
-      if (ch === '"' && next === '"') {
-        cell += '"';
-        i++;
-      } else if (ch === '"') {
-        inQuotes = false;
-      } else {
-        cell += ch;
-      }
-    } else if (ch === '"') {
-      inQuotes = true;
-    } else if (ch === sep) {
-      row.push(cell.trim());
-      cell = '';
-    } else if (ch === '\n' || (ch === '\r' && next === '\n')) {
-      row.push(cell.trim());
-      if (row.some((c) => c !== '')) rows.push(row);
-      row = [];
-      cell = '';
-      if (ch === '\r') i++;
-    } else if (ch !== '\r') {
-      cell += ch;
-    }
-  }
-  // last cell
-  row.push(cell.trim());
-  if (row.some((c) => c !== '')) rows.push(row);
-
-  return rows;
 }
 
 function col(headers: string[], ...candidates: string[]): number {
@@ -64,12 +14,14 @@ function col(headers: string[], ...candidates: string[]): number {
   return headers.findIndex((h) => set.includes(h));
 }
 
-function cell(row: string[], i: number): string {
+function cell(row: unknown[], i: number): string {
   if (i < 0 || i >= row.length) return '';
-  return (row[i] ?? '').trim();
+  const v = row[i];
+  if (v == null) return '';
+  return String(v).trim();
 }
 
-function num(row: string[], i: number): number {
+function num(row: unknown[], i: number): number {
   const s = cell(row, i).replace(',', '.');
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : 0;
@@ -105,16 +57,34 @@ function detectAssembly(services: string[], hasAssemblyRaw: string): boolean {
 export interface ParseResult {
   orders: Order[];
   errors: string[];
+  sheetName: string;
   rowCount: number;
 }
 
-export function parseOrdersFromCsv(text: string): ParseResult {
-  const rows = parseCsv(text);
-  if (rows.length < 2) {
-    return { orders: [], errors: ['No data rows found'], rowCount: 0 };
+export function parseOrdersFromExcel(buffer: ArrayBuffer): ParseResult {
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const sheetName = workbook.SheetNames[0] ?? '';
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet) {
+    return { orders: [], errors: ['Empty workbook'], sheetName, rowCount: 0 };
   }
 
-  const headerRow = rows[0].map(norm);
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    defval: '',
+    raw: false,
+  }) as unknown[][];
+
+  if (rows.length < 2) {
+    return {
+      orders: [],
+      errors: ['No data rows found'],
+      sheetName,
+      rowCount: 0,
+    };
+  }
+
+  const headerRow = (rows[0] ?? []).map((h) => norm(h));
   const dataRows = rows.slice(1);
 
   const iId = col(headerRow, 'id', 'orderid', 'ncommande', 'commande', 'ref', 'reference');
@@ -176,7 +146,7 @@ export function parseOrdersFromCsv(text: string): ParseResult {
 
   dataRows.forEach((row, idx) => {
     const rowNum = idx + 2;
-    if (row.every((c) => !c.trim())) return;
+    if (!Array.isArray(row) || row.every((c) => cell([c], 0) === '')) return;
 
     const city = cell(row, iCity);
     const neighborhood = cell(row, iNeighborhood);
@@ -205,5 +175,10 @@ export function parseOrdersFromCsv(text: string): ParseResult {
     });
   });
 
-  return { orders, errors, rowCount: dataRows.length };
+  return {
+    orders,
+    errors,
+    sheetName,
+    rowCount: dataRows.length,
+  };
 }
