@@ -25,10 +25,10 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [importing, setImporting] = useState(false);
   const [lastImport, setLastImport] = useState<{
-  count: number;
-  errors: string[];
-  sheetName?: string;
-} | null>(null);
+    count: number;
+    errors: string[];
+    sheetName: string;
+  } | null>(null);
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'all'>('all');
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -37,39 +37,39 @@ export default function OrdersPage() {
   }, []);
 
   async function handleFile(file: File) {
-  setImporting(true);
-  setLastImport(null);
-  try {
-    const buffer = await file.arrayBuffer();
-    const result = parseOrdersFromExcel(buffer);
-    if (result.orders.length === 0) {
+    setImporting(true);
+    setLastImport(null);
+    try {
+      const buffer = await file.arrayBuffer();
+      const result = parseOrdersFromExcel(buffer);
+      if (result.orders.length === 0) {
+        setLastImport({
+          count: 0,
+          errors: result.errors.length
+            ? result.errors
+            : ['No valid orders found in file'],
+          sheetName: result.sheetName,
+        });
+        return;
+      }
+      const next = replaceOrders(result.orders);
+      setOrders(next);
       setLastImport({
-        count: 0,
-        errors: result.errors.length
-          ? result.errors
-          : ['No valid orders found in file'],
+        count: result.orders.length,
+        errors: result.errors,
         sheetName: result.sheetName,
       });
-      return;
+    } catch (err) {
+      setLastImport({
+        count: 0,
+        errors: [err instanceof Error ? err.message : 'Failed to parse file'],
+        sheetName: '',
+      });
+    } finally {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = '';
     }
-    const next = replaceOrders(result.orders);
-    setOrders(next);
-    setLastImport({
-      count: result.orders.length,
-      errors: result.errors,
-      sheetName: result.sheetName,
-    });
-  } catch (err) {
-    setLastImport({
-      count: 0,
-      errors: [err instanceof Error ? err.message : 'Failed to parse file'],
-      sheetName: '',
-    });
-  } finally {
-    setImporting(false);
-    if (fileRef.current) fileRef.current.value = '';
   }
-}
 
   function onInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -108,7 +108,7 @@ export default function OrdersPage() {
     <>
       <PageHeader
         title="Orders & Calls"
-        description="Import daily orders from CSV, then confirm statuses before planning."
+        description="Import daily orders from Excel, then confirm statuses before planning."
         actions={
           <div className="flex gap-2">
             <input
@@ -123,7 +123,7 @@ export default function OrdersPage() {
               onClick={() => fileRef.current?.click()}
               disabled={importing}
             >
-              {importing ? 'Importing…' : 'Import CSV'}
+              {importing ? 'Importing…' : 'Import Excel'}
             </Button>
             {orders.length > 0 && (
               <Button size="sm" variant="danger" onClick={handleClear}>
@@ -140,7 +140,14 @@ export default function OrdersPage() {
             {lastImport.count > 0 ? (
               <>
                 Imported <strong>{lastImport.count}</strong> order
-                {lastImport.count !== 1 ? 's' : ''}.
+                {lastImport.count !== 1 ? 's' : ''}
+                {lastImport.sheetName ? (
+                  <>
+                    {' '}
+                    from sheet <em>{lastImport.sheetName}</em>
+                  </>
+                ) : null}
+                .
               </>
             ) : (
               'Import finished with no orders.'
@@ -192,7 +199,7 @@ export default function OrdersPage() {
         {filtered.length === 0 ? (
           <div className="p-8 text-center text-sm text-[var(--text-secondary)]">
             {orders.length === 0
-              ? 'No orders yet. Export Excel as CSV, then click “Import CSV”.'
+              ? 'No orders yet. Click “Import Excel” to load today’s file.'
               : 'No orders match this filter.'}
           </div>
         ) : (
@@ -276,10 +283,11 @@ export default function OrdersPage() {
       </Card>
 
       <p className="mt-4 text-xs text-[var(--text-muted)] leading-relaxed max-w-2xl">
-        Use CSV only (Excel → Save As → CSV). Columns detected automatically:
-        id, city/ville, neighborhood/quartier, volume, value/montant, services,
-        assembly/montage, timeslot/créneau, customer/client, phone/téléphone,
-        status/statut. Import replaces the current list.
+        Accepts .xlsx / .xls / .csv. First sheet is used. Columns detected
+        automatically: id, city/ville, neighborhood/quartier, volume,
+        value/montant, services, assembly/montage, timeslot/créneau,
+        customer/client, phone/téléphone, status/statut. Import replaces the
+        current list.
       </p>
     </>
   );
