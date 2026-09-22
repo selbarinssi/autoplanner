@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { exportPlanToExcel } from '@/lib/exportPlanToExcel';
 import type { Order, Vehicle, Neighborhood } from '@/domain/types';
 import { autoAssign } from '@/domain/assignment/autoAssign';
 import type { VehicleState } from '@/domain/assignment/createVehicleState';
@@ -197,25 +198,31 @@ export default function PlanPage() {
         title="Plan Board"
         description="Auto-dispatch, then drag orders between vans or unassigned. Sequence uses nearest-neighbor + time slots."
         actions={
-          <>
-            <Button variant="secondary" size="sm" onClick={reloadAll}>
-              Refresh
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowSequence((s) => !s)}
-            >
-              {showSequence ? 'Hide sequence' : 'Show sequence'}
-            </Button>
-            <Button variant="secondary" size="sm" onClick={clearAssignments}>
-              Clear plan
-            </Button>
-            <Button size="sm" onClick={runAutoPlan}>
-              Auto-Plan
-            </Button>
-          </>
-        }
+  <>
+    <Button variant="secondary" size="sm" onClick={reloadMaster}>
+      Refresh data
+    </Button>
+    <Button variant="secondary" size="sm" onClick={clearAssignments}>
+      Clear plan
+    </Button>
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={() =>
+        exportPlanToExcel(
+          getOrders(),
+          getVehicles(),
+          getNeighborhoods()
+        )
+      }
+    >
+      Export Excel
+    </Button>
+    <Button size="sm" onClick={runAutoPlan}>
+      Auto-Plan
+    </Button>
+  </>
+}
       />
 
       {message && (
