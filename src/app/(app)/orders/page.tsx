@@ -9,7 +9,7 @@ import {
   upsertOrder,
   deleteOrder,
 } from '@/lib/repositories/orders';
-import { parseOrdersFromCsv } from '@/lib/parseOrdersFromCsv';
+import { parseOrdersFromExcel } from '@/lib/parseOrdersFromExcel';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -25,9 +25,10 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [importing, setImporting] = useState(false);
   const [lastImport, setLastImport] = useState<{
-    count: number;
-    errors: string[];
-  } | null>(null);
+  count: number;
+  errors: string[];
+  sheetName?: string;
+} | null>(null);
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'all'>('all');
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -36,47 +37,39 @@ export default function OrdersPage() {
   }, []);
 
   async function handleFile(file: File) {
-    setImporting(true);
-    setLastImport(null);
-    try {
-      const name = file.name.toLowerCase();
-      if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
-        setLastImport({
-          count: 0,
-          errors: [
-            'Excel (.xlsx) is not supported without installing a package. In Excel: File → Save As → CSV (Comma or Semicolon delimited), then import that file.',
-          ],
-        });
-        return;
-      }
-
-      const text = await file.text();
-      const result = parseOrdersFromCsv(text);
-      if (result.orders.length === 0) {
-        setLastImport({
-          count: 0,
-          errors: result.errors.length
-            ? result.errors
-            : ['No valid orders found in file'],
-        });
-        return;
-      }
-      const next = replaceOrders(result.orders);
-      setOrders(next);
-      setLastImport({
-        count: result.orders.length,
-        errors: result.errors,
-      });
-    } catch (err) {
+  setImporting(true);
+  setLastImport(null);
+  try {
+    const buffer = await file.arrayBuffer();
+    const result = parseOrdersFromExcel(buffer);
+    if (result.orders.length === 0) {
       setLastImport({
         count: 0,
-        errors: [err instanceof Error ? err.message : 'Failed to parse file'],
+        errors: result.errors.length
+          ? result.errors
+          : ['No valid orders found in file'],
+        sheetName: result.sheetName,
       });
-    } finally {
-      setImporting(false);
-      if (fileRef.current) fileRef.current.value = '';
+      return;
     }
+    const next = replaceOrders(result.orders);
+    setOrders(next);
+    setLastImport({
+      count: result.orders.length,
+      errors: result.errors,
+      sheetName: result.sheetName,
+    });
+  } catch (err) {
+    setLastImport({
+      count: 0,
+      errors: [err instanceof Error ? err.message : 'Failed to parse file'],
+      sheetName: '',
+    });
+  } finally {
+    setImporting(false);
+    if (fileRef.current) fileRef.current.value = '';
   }
+}
 
   function onInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -121,7 +114,7 @@ export default function OrdersPage() {
             <input
               ref={fileRef}
               type="file"
-              accept=".csv,text/csv"
+              accept=".xlsx,.xls,.csv"
               className="hidden"
               onChange={onInputChange}
             />
