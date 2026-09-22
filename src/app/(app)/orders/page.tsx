@@ -9,7 +9,10 @@ import {
   upsertOrder,
   deleteOrder,
 } from '@/lib/repositories/orders';
-import { parseOrdersFromExcel } from '@/lib/parseOrdersFromExcel';
+import {
+  parseOrdersFromExcel,
+  type PostalMapping,
+} from '@/lib/parseOrdersFromExcel';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -30,10 +33,15 @@ export default function OrdersPage() {
     sheetName: string;
   } | null>(null);
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'all'>('all');
+  const [postal, setPostal] = useState<PostalMapping>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+    useEffect(() => {
     setOrders(getOrders());
+    fetch('/postal-codes.json')
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((d) => setPostal(d as PostalMapping))
+      .catch(() => setPostal({}));
   }, []);
 
   async function handleFile(file: File) {
@@ -41,7 +49,7 @@ export default function OrdersPage() {
     setLastImport(null);
     try {
       const buffer = await file.arrayBuffer();
-      const result = parseOrdersFromExcel(buffer);
+      const result = parseOrdersFromExcel(buffer, postal);
       if (result.orders.length === 0) {
         setLastImport({
           count: 0,
@@ -283,11 +291,9 @@ export default function OrdersPage() {
       </Card>
 
       <p className="mt-4 text-xs text-[var(--text-muted)] leading-relaxed max-w-2xl">
-        Accepts .xlsx / .xls / .csv. First sheet is used. Columns detected
-        automatically: id, city/ville, neighborhood/quartier, volume,
-        value/montant, services, assembly/montage, timeslot/créneau,
-        customer/client, phone/téléphone, status/statut. Import replaces the
-        current list.
+        IKEA export only (same as O&apos;Planner): header at row 6 with Document
+        No., Service Name, Sell-to Postcode. City/area from postal-codes.json.
+        Lines grouped by Document No. Import replaces the current list.
       </p>
     </>
   );
