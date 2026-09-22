@@ -1,58 +1,8 @@
 import * as XLSX from 'xlsx';
-import type { Order, OrderStatus } from '@/domain/types';
+import type { Order } from '@/domain/types';
+import { ASSEMBLY_KEYWORDS } from '@/config/trsServices';
 
-function norm(h: unknown): string {
-  return String(h ?? '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function col(headers: string[], ...candidates: string[]): number {
-  const set = candidates.map(norm);
-  return headers.findIndex((h) => set.includes(h));
-}
-
-function cell(row: unknown[], i: number): string {
-  if (i < 0 || i >= row.length) return '';
-  const v = row[i];
-  if (v == null) return '';
-  return String(v).trim();
-}
-
-function num(row: unknown[], i: number): number {
-  const s = cell(row, i).replace(',', '.');
-  const n = parseFloat(s);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function parseServices(raw: string): string[] {
-  if (!raw) return [];
-  return raw
-    .split(/[;,|]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function parseStatus(raw: string): OrderStatus {
-  const s = raw.toLowerCase();
-  if (s.includes('unreach') || s.includes('injoign')) return 'unreachable';
-  if (s.includes('postpon') || s.includes('report')) return 'postponed';
-  if (s.includes('cancel') || s.includes('annul')) return 'cancelled';
-  return 'confirmed';
-}
-
-function detectAssembly(services: string[], hasAssemblyRaw: string): boolean {
-  if (hasAssemblyRaw) {
-    const v = hasAssemblyRaw.toLowerCase();
-    if (['1', 'true', 'yes', 'oui', 'y', 'x'].includes(v)) return true;
-    if (['0', 'false', 'no', 'non', 'n'].includes(v)) return false;
-  }
-  return services.some((s) =>
-    /assembl|montage|da\b|installation/i.test(s)
-  );
-}
+export type PostalMapping = Record<string, { city: string; area: string }>;
 
 export interface ParseResult {
   orders: Order[];
@@ -61,7 +11,28 @@ export interface ParseResult {
   rowCount: number;
 }
 
-export function parseOrdersFromExcel(buffer: ArrayBuffer): ParseResult {
+function str(v: unknown): string {
+  if (v == null) return '';
+  return String(v).trim();
+}
+
+function num(v: unknown): number {
+  const n = parseFloat(String(v ?? '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * IKEA export parser — same logic as O'Planner:
+ * - Header row starts at Excel row 6 (range index 5)
+ * - Columns: Document No., Service Name, Sell-to Postcode, volume, value
+ * - Fixed indices: time slot H, customer name AK, phone AP, assembly col 47
+ * - Group lines by Document No.
+ * - City/area from postal-codes.json
+ */
+export function parseOrdersFromExcel(
+  buffer: ArrayBuffer,
+  postal: PostalMapping = {}
+): ParseResult {
   const workbook = XLSX.read(buffer, { type: 'array' });
   const sheetName = workbook.SheetNames[0] ?? '';
   const sheet = workbook.Sheets[sheetName];
@@ -69,116 +40,120 @@ export function parseOrdersFromExcel(buffer: ArrayBuffer): ParseResult {
     return { orders: [], errors: ['Empty workbook'], sheetName, rowCount: 0 };
   }
 
+  // O'Planner: skip first 5 rows so header is the IKEA column titles
   const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
     header: 1,
     defval: '',
     raw: false,
+    range: 5,
   }) as unknown[][];
 
   if (rows.length < 2) {
     return {
       orders: [],
-      errors: ['No data rows found'],
+      errors: [
+        'No data rows. Expected IKEA export (header around row 6 with "Document No.").',
+      ],
       sheetName,
       rowCount: 0,
     };
   }
 
-  const headerRow = (rows[0] ?? []).map((h) => norm(h));
-  const dataRows = rows.slice(1);
+  const h = (rows[0] ?? []).map((x) => str(x));
+  const docIdx = h.indexOf('Document No.');
+  const nameIdx = h.indexOf('Service Name');
+  const pcIdx = h.indexOf('Sell-to Postcode');
+  const volIdx = h.indexOf('Capacity Value Volume');
+  const valIdx = h.indexOf('Service Goods Value');
 
-  const iId = col(headerRow, 'id', 'orderid', 'ncommande', 'commande', 'ref', 'reference');
-  const iCity = col(headerRow, 'city', 'ville');
-  const iNeighborhood = col(
-    headerRow,
-    'neighborhood',
-    'quartier',
-    'area',
-    'zone',
-    'secteur'
-  );
-  const iVolume = col(headerRow, 'volume', 'vol', 'm3', 'volumem3');
-  const iValue = col(headerRow, 'value', 'valeur', 'montant', 'amount', 'total');
-  const iServices = col(
-    headerRow,
-    'services',
-    'service',
-    'prestations',
-    'prestation'
-  );
-  const iAssembly = col(
-    headerRow,
-    'hasassembly',
-    'assembly',
-    'montage',
-    'assemblage'
-  );
-  const iTimeSlot = col(
-    headerRow,
-    'timeslot',
-    'creneau',
-    'slot',
-    'horaire',
-    'heure',
-    'deliverytime'
-  );
-  const iName = col(
-    headerRow,
-    'custname',
-    'customer',
-    'client',
-    'nom',
-    'name',
-    'customername'
-  );
-  const iPhone = col(
-    headerRow,
-    'custphone',
-    'phone',
-    'telephone',
-    'tel',
-    'mobile'
-  );
-  const iStatus = col(headerRow, 'status', 'statut', 'etat');
+  // Same fixed columns as O'Planner
+  const timeSlotIdx = 7;
+  const custNameIdx = 36;
+  const custPhoneIdx = 41;
+  const assemblyIdx = 47;
 
-  const orders: Order[] = [];
+  if (docIdx < 0) {
+    return {
+      orders: [],
+      errors: [
+        'Not an IKEA planning export: column "Document No." not found after row 6. Use the same Excel file as O\'Planner.',
+      ],
+      sheetName,
+      rowCount: rows.length - 1,
+    };
+  }
+
+  if (Object.keys(postal).length === 0) {
+    // Still import; city/area may be Unknown / postcode
+  }
+
+  type Acc = Order & { assemblyMin: number };
+  const grouped = new Map<string, Acc>();
   const errors: string[] = [];
+  let dataRows = 0;
 
-  dataRows.forEach((row, idx) => {
-    const rowNum = idx + 2;
-    if (!Array.isArray(row) || row.every((c) => cell([c], 0) === '')) return;
+  for (const row of rows.slice(1)) {
+    if (!Array.isArray(row)) continue;
+    const id = str(row[docIdx]);
+    if (!id || id === 'undefined') continue;
+    dataRows++;
 
-    const city = cell(row, iCity);
-    const neighborhood = cell(row, iNeighborhood);
-    if (!city && !neighborhood) {
-      errors.push(`Row ${rowNum}: missing city and neighborhood — skipped`);
-      return;
+    const rawPc = str(row[pcIdx]).split('.')[0].trim();
+    const map = postal[rawPc] || { city: 'Unknown', area: rawPc };
+
+    let g = grouped.get(id);
+    if (!g) {
+      g = {
+        id,
+        city: map.city,
+        neighborhood: map.area,
+        volume: 0,
+        value: 0,
+        services: [],
+        hasAssembly: false,
+        timeSlot: str(row[timeSlotIdx]),
+        custName: str(row[custNameIdx]),
+        custPhone: str(row[custPhoneIdx]),
+        status: 'confirmed',
+        assignedTo: null,
+        assemblyMin: 0,
+      };
+      grouped.set(id, g);
     }
 
-    const services = parseServices(cell(row, iServices));
-    const hasAssembly = detectAssembly(services, cell(row, iAssembly));
-    const id = cell(row, iId) || `imp-${crypto.randomUUID().slice(0, 8)}`;
+    if (!g.custName && str(row[custNameIdx])) g.custName = str(row[custNameIdx]);
+    if (!g.custPhone && str(row[custPhoneIdx]))
+      g.custPhone = str(row[custPhoneIdx]);
+    if (!g.timeSlot && str(row[timeSlotIdx])) g.timeSlot = str(row[timeSlotIdx]);
 
-    orders.push({
-      id,
-      city: city || 'Casablanca',
-      neighborhood: neighborhood || '',
-      volume: num(row, iVolume),
-      value: num(row, iValue),
-      services,
-      hasAssembly,
-      timeSlot: cell(row, iTimeSlot),
-      custName: cell(row, iName),
-      custPhone: cell(row, iPhone),
-      status: parseStatus(cell(row, iStatus)),
-      assignedTo: null,
-    });
-  });
+    g.volume = Math.max(g.volume, num(row[volIdx]));
+    g.value = Math.max(g.value, num(row[valIdx]));
+    g.assemblyMin = Math.max(g.assemblyMin, num(row[assemblyIdx]));
+
+    const sn = str(row[nameIdx]);
+    if (sn && !g.services.includes(sn)) g.services.push(sn);
+    if (ASSEMBLY_KEYWORDS.some((kw) => sn.includes(kw))) g.hasAssembly = true;
+    if (g.assemblyMin > 0) g.hasAssembly = true;
+  }
+
+  const orders: Order[] = [...grouped.values()].map(
+    ({ assemblyMin: _a, ...o }) => o
+  );
+
+  if (orders.length === 0) {
+    errors.push(
+      'No orders grouped. Check the file is the standard IKEA service lines export.'
+    );
+  } else if (Object.keys(postal).length === 0) {
+    errors.push(
+      'Warning: postal-codes.json not loaded — cities may show as Unknown. Ensure public/postal-codes.json is deployed.'
+    );
+  }
 
   return {
     orders,
     errors,
     sheetName,
-    rowCount: dataRows.length,
+    rowCount: dataRows,
   };
 }
