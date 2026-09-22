@@ -330,17 +330,20 @@ export default function PlanPage() {
                   >
                     <div className="px-4 py-3 border-b border-[var(--border)]">
                       <div className="flex items-center justify-between gap-2">
-                        <h3 className="font-serif text-base font-medium">
-                          {v.type}
-                          {v.primaryNeighborhood
-                            ? ` · ${v.primaryNeighborhood}`
-                            : ''}
+                      <h3 className="font-mono text-base font-semibold tracking-tight">
+                          {v.id}
                         </h3>
                         <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-                          {v.city}
+                          {v.type}
                         </span>
                       </div>
-                      <p className="text-xs text-[var(--text-muted)] mt-1">
+                      <p className="text-xs text-[var(--text-secondary)] mt-1">
+                        {v.city}
+                        {v.primaryNeighborhood
+                          ? ` · ${v.primaryNeighborhood}`
+                          : ''}
+                      </p>
+                      <p className="text-xs text-[var(--text-muted)] mt-0.5">
                         {list.length} order{list.length !== 1 ? 's' : ''}
                         {' · '}
                         {vol.toFixed(1)} / {v.capacity} m³
@@ -454,7 +457,7 @@ function OrderChip({
           <option value="">Unassigned</option>
           {vehicles.map((v) => (
             <option key={v.id} value={v.id}>
-              {v.type}
+              {v.id} · {v.city}
               {v.primaryNeighborhood ? ` · ${v.primaryNeighborhood}` : ''}
             </option>
           ))}
