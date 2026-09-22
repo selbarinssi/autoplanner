@@ -9,7 +9,7 @@ import {
   upsertOrder,
   deleteOrder,
 } from '@/lib/repositories/orders';
-import { parseOrdersFromExcel } from '@/lib/parseOrdersFromExcel';
+import { parseOrdersFromCsv } from '@/lib/parseOrdersFromCsv';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -27,7 +27,6 @@ export default function OrdersPage() {
   const [lastImport, setLastImport] = useState<{
     count: number;
     errors: string[];
-    sheetName: string;
   } | null>(null);
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'all'>('all');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -40,15 +39,25 @@ export default function OrdersPage() {
     setImporting(true);
     setLastImport(null);
     try {
-      const buffer = await file.arrayBuffer();
-      const result = parseOrdersFromExcel(buffer);
+      const name = file.name.toLowerCase();
+      if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+        setLastImport({
+          count: 0,
+          errors: [
+            'Excel (.xlsx) is not supported without installing a package. In Excel: File → Save As → CSV (Comma or Semicolon delimited), then import that file.',
+          ],
+        });
+        return;
+      }
+
+      const text = await file.text();
+      const result = parseOrdersFromCsv(text);
       if (result.orders.length === 0) {
         setLastImport({
           count: 0,
           errors: result.errors.length
             ? result.errors
             : ['No valid orders found in file'],
-          sheetName: result.sheetName,
         });
         return;
       }
@@ -57,13 +66,11 @@ export default function OrdersPage() {
       setLastImport({
         count: result.orders.length,
         errors: result.errors,
-        sheetName: result.sheetName,
       });
     } catch (err) {
       setLastImport({
         count: 0,
         errors: [err instanceof Error ? err.message : 'Failed to parse file'],
-        sheetName: '',
       });
     } finally {
       setImporting(false);
@@ -83,8 +90,7 @@ export default function OrdersPage() {
   }
 
   function setStatus(order: Order, status: OrderStatus) {
-    const updated = upsertOrder({ ...order, status });
-    setOrders(updated);
+    setOrders(upsertOrder({ ...order, status }));
   }
 
   function remove(id: string) {
@@ -109,13 +115,13 @@ export default function OrdersPage() {
     <>
       <PageHeader
         title="Orders & Calls"
-        description="Import daily orders from Excel, then confirm statuses before planning."
+        description="Import daily orders from CSV, then confirm statuses before planning."
         actions={
           <div className="flex gap-2">
             <input
               ref={fileRef}
               type="file"
-              accept=".xlsx,.xls,.csv"
+              accept=".csv,text/csv"
               className="hidden"
               onChange={onInputChange}
             />
@@ -124,7 +130,7 @@ export default function OrdersPage() {
               onClick={() => fileRef.current?.click()}
               disabled={importing}
             >
-              {importing ? 'Importing…' : 'Import Excel'}
+              {importing ? 'Importing…' : 'Import CSV'}
             </Button>
             {orders.length > 0 && (
               <Button size="sm" variant="danger" onClick={handleClear}>
@@ -135,21 +141,13 @@ export default function OrdersPage() {
         }
       />
 
-      {/* Import feedback */}
       {lastImport && (
         <Card className="mb-6">
           <p className="text-sm">
             {lastImport.count > 0 ? (
               <>
                 Imported <strong>{lastImport.count}</strong> order
-                {lastImport.count !== 1 ? 's' : ''}
-                {lastImport.sheetName ? (
-                  <>
-                    {' '}
-                    from sheet <em>{lastImport.sheetName}</em>
-                  </>
-                ) : null}
-                .
+                {lastImport.count !== 1 ? 's' : ''}.
               </>
             ) : (
               'Import finished with no orders.'
@@ -168,7 +166,6 @@ export default function OrdersPage() {
         </Card>
       )}
 
-      {/* Status filters */}
       <div className="flex flex-wrap gap-2 mb-4">
         {(
           [
@@ -193,19 +190,16 @@ export default function OrdersPage() {
             `}
           >
             {label}
-            <span className="opacity-60 ml-1.5">
-              {counts[key]}
-            </span>
+            <span className="opacity-60 ml-1.5">{counts[key]}</span>
           </button>
         ))}
       </div>
 
-      {/* Table */}
       <Card padding={false}>
         {filtered.length === 0 ? (
           <div className="p-8 text-center text-sm text-[var(--text-secondary)]">
             {orders.length === 0
-              ? 'No orders yet. Click “Import Excel” to load today’s file.'
+              ? 'No orders yet. Export Excel as CSV, then click “Import CSV”.'
               : 'No orders match this filter.'}
           </div>
         ) : (
@@ -288,11 +282,11 @@ export default function OrdersPage() {
         )}
       </Card>
 
-      {/* Column help */}
       <p className="mt-4 text-xs text-[var(--text-muted)] leading-relaxed max-w-2xl">
-        Expected columns (any language / order): id, city/ville, neighborhood/quartier,
-        volume, value/montant, services, assembly/montage, timeslot/créneau, customer/client,
-        phone/téléphone, status/statut. First sheet is used. Import replaces the current list.
+        Use CSV only (Excel → Save As → CSV). Columns detected automatically:
+        id, city/ville, neighborhood/quartier, volume, value/montant, services,
+        assembly/montage, timeslot/créneau, customer/client, phone/téléphone,
+        status/statut. Import replaces the current list.
       </p>
     </>
   );
