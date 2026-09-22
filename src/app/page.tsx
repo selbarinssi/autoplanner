@@ -19,7 +19,7 @@ export default function HomePage() {
             Open Plan Board
           </a>
           <a
-            href="/config"
+            href="/config/neighborhoods"
             className="px-5 py-2.5 border border-[var(--border-strong)] text-[var(--text)] text-sm font-medium rounded-[var(--radius-sm)] hover:bg-[var(--bg-muted)] transition-colors"
           >
             Configuration
